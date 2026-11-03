@@ -5,12 +5,14 @@
 // Firebase Authentication + Firestore Rules (file firestore.rules).
 // =====================================================================
 export const firebaseConfig = {
-  apiKey: "DIEN_API_KEY",
-  authDomain: "DIEN_PROJECT_ID.firebaseapp.com",
-  projectId: "DIEN_PROJECT_ID",
-  storageBucket: "DIEN_PROJECT_ID.appspot.com",
-  messagingSenderId: "DIEN_SENDER_ID",
-  appId: "DIEN_APP_ID"
+apiKey: "AIzaSyDbuop4-AcG0QhmSFr4SDNPG-sClHBgIdo",
+  authDomain: "kaiwa-2683e.firebaseapp.com",
+  databaseURL: "https://kaiwa-2683e-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "kaiwa-2683e",
+  storageBucket: "kaiwa-2683e.firebasestorage.app",
+  messagingSenderId: "666887438042",
+  appId: "1:666887438042:web:9385edbc5904fc49e1afe3",
+  measurementId: "G-Y67HH0FBG2"
 };
 
 // Email chủ sở hữu: luôn có quyền Quản trị, kể cả khi chưa có hồ sơ.
