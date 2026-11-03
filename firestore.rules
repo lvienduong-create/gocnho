@@ -1,0 +1,61 @@
+rules_version = '2';
+// Firestore Rules – Start Kaiwa Shadowing Relay
+// Dán toàn bộ nội dung này vào Firebase Console › Firestore Database › Rules › Publish.
+// Sửa danh sách OWNER cho khớp với OWNER_EMAILS trong js/firebase-config.js.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner() {
+      return signedIn() && request.auth.token.email in ['l.vienduong@gmail.com'];
+    }
+    function profilePath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasProfile() { return signedIn() && exists(profilePath()); }
+    function role() { return hasProfile() ? get(profilePath()).data.role : 'none'; }
+    function mySeat() { return get(profilePath()).data.seat; }
+    function isAdmin() { return isOwner() || role() == 'admin'; }
+    function isControl() { return isAdmin() || role() == 'control'; }
+    function isJudge() { return role() == 'judge'; }
+    function isViewer() { return role() == 'viewer'; }
+    function isStaff() { return isControl() || isJudge() || isViewer(); }
+    function gameState() { return get(/databases/$(database)/documents/game/state).data; }
+
+    // Tài khoản & quyền: chỉ Quản trị sửa; mỗi người đọc được hồ sơ của mình
+    match /users/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow write: if isAdmin();
+    }
+
+    // Danh sách thành viên, ngân hàng câu, cài đặt: Quản trị nhập, người đã cấp quyền đọc
+    match /setup/{docId} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    // Trạng thái lượt thi, danh sách vắng mặt: MC / Thư ký điều khiển
+    match /game/{docId} {
+      allow read: if isStaff();
+      allow write: if isControl();
+    }
+
+    // Kết quả từng lượt: MC / Thư ký chốt
+    match /results/{id} {
+      allow read: if isStaff();
+      allow write: if isControl();
+    }
+
+    // Phiếu chấm: giám khảo chỉ ghi phiếu của ghế mình, đúng lượt đang mở, chỉ Đạt / Không đạt
+    match /votes/{voteId} {
+      allow read: if isControl() || isViewer()
+                  || (isJudge() && (resource == null || resource.data.seat == mySeat()));
+      allow create, update: if isJudge()
+                  && request.resource.data.keys().hasOnly(['turnKey', 'seat', 'vote', 'at'])
+                  && request.resource.data.seat == mySeat()
+                  && request.resource.data.vote in ['pass', 'fail']
+                  && voteId == request.resource.data.turnKey + '_j' + string(mySeat())
+                  && gameState().status == 'open'
+                  && gameState().turnKey == request.resource.data.turnKey;
+      allow delete: if isControl();
+    }
+  }
+}
