@@ -178,3 +178,10 @@ label{font-size:.85rem;font-weight:600}
 .ok{background:var(--pass-soft);border:1px solid var(--pass);border-radius:8px;padding:10px 12px;font-size:.88rem}
 td input,td select{width:100%;min-width:90px;padding:6px 8px}
 .stage-nav button{font-size:.8rem;color:var(--stage-muted);background:transparent;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:4px 12px;font-weight:500}
+
+/* Ô mật khẩu có nút con mắt */
+.pw-wrap{position:relative;display:flex}
+.pw-wrap input{flex:1;width:100%;padding-right:44px}
+.pw-wrap .eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);min-width:36px;min-height:32px;padding:2px 6px;border:none;background:transparent;font-size:1.05rem;line-height:1;opacity:.55;cursor:pointer}
+.pw-wrap .eye.on{opacity:1}
+.pw-wrap .eye:focus-visible{outline:3px solid var(--accent);outline-offset:1px;border-radius:6px}

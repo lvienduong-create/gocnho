@@ -1,5 +1,5 @@
 // Start Kaiwa · Shadowing Relay – trang thi đấu (Điều khiển / Giám khảo / Màn hình lớn)
-import { configured, db, watchAuth, login, logout, resetPassword, errText, ROLES, DEFAULT_SETTINGS, esc, lsGet, lsSet } from "./core.js";
+import { configured, db, watchAuth, login, logout, errText, pwField, toggleEye, ROLES, DEFAULT_SETTINGS, esc, lsGet, lsSet } from "./core.js";
 
 const LAB = { "Chưa biết": "Dễ", "N5": "Dễ", "N4": "Trung bình", "N3": "Trung bình", "N2": "Khó", "N1": "Khó" };
 const LVC = { "Dễ": "lv-cb", "Trung bình": "lv-n4", "Khó": "lv-n2", "★": "lv-n1" };
@@ -227,11 +227,11 @@ function renderLogin() {
     <p class="note">${tr("Dùng tài khoản do BTC cấp. Giám khảo, MC, thư ký và màn hình lớn mỗi vị trí một tài khoản.", "運営から発行されたアカウントでログインしてください。")}</p>
     ${u.loginErr ? `<div class="err">${esc(u.loginErr)}</div>` : ""}${u.loginMsg ? `<div class="ok">${esc(u.loginMsg)}</div>` : ""}
     <form id="loginForm" class="form-grid" style="grid-template-columns:1fr">
-      <div class="field"><label for="em">Email</label><input id="em" type="email" autocomplete="username" required></div>
-      <div class="field"><label for="pw">${tr("Mật khẩu", "パスワード")}</label><input id="pw" type="password" autocomplete="current-password" required></div>
+      <div class="field"><label for="em">${tr("ID đăng nhập", "ログインID")}</label><input id="em" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="VD: thuky" required></div>
+      ${pwField("pw", tr("Mật khẩu", "パスワード"), 'autocomplete="current-password" required')}
       <button class="primary" type="submit" ${u.busy ? "disabled" : ""}>${tr("Đăng nhập", "ログイン")}</button>
     </form>
-    <button data-act="forgot" type="button">${tr("Quên mật khẩu", "パスワードを忘れた場合")}</button>
+    <p class="note">${tr("Quên mật khẩu: liên hệ BTC để được cấp mật khẩu mới.", "パスワードを忘れた場合は運営にご連絡ください。")}</p>
   </div></div>`;
 }
 function renderNoRole() {
@@ -392,6 +392,29 @@ function render() {
   if (v === "dieu-khien") renderControl(); else if (v === "giam-khao") renderJudge(); else if (v === "man-hinh") renderStage(); else renderHome();
 }
 
+
+/* ---------- audio mẫu: phát audio/<file>.mp3, nếu không có file thì dùng giọng đọc của trình duyệt ---------- */
+let sampleAudio = null;
+function speakFallback(text) {
+  try {
+    if (!("speechSynthesis" in window)) return;
+    const t = new SpeechSynthesisUtterance(text); t.lang = "ja-JP"; t.rate = .9;
+    const v = speechSynthesis.getVoices().find(x => /^ja/i.test(x.lang)); if (v) t.voice = v;
+    if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+    setTimeout(() => speechSynthesis.speak(t), 120);
+    window.__lastUtter = t;
+  } catch (e) { }
+}
+function playSample(sn) {
+  const file = String(sn.audio || ("audio_" + sn.id + ".mp3")).trim();
+  try { if (sampleAudio) { sampleAudio.pause(); sampleAudio = null } } catch (e) { }
+  const au = new Audio("audio/" + encodeURIComponent(file));
+  sampleAudio = au;
+  au.onerror = () => { if (sampleAudio === au) { sampleAudio = null; speakFallback(sn.jp || "") } };
+  const p = au.play(); if (p && p.catch) p.catch(() => { if (sampleAudio === au) { sampleAudio = null; speakFallback(sn.jp || "") } });
+}
+try { if ("speechSynthesis" in window) { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices() } } catch (e) { }
+
 /* ---------- events ---------- */
 app.addEventListener("click", e => {
   const b = e.target.closest("[data-act]"); if (!b || b.tagName === "SELECT") return;
@@ -409,12 +432,8 @@ app.addEventListener("click", e => {
   else if (a === "lang") { lsSet("lang", b.dataset.l); render() }
   else if (a === "vote") castVote(b.dataset.v);
   else if (a === "logout") logout();
-  else if (a === "forgot") {
-    const em = (document.getElementById("em") || {}).value || "";
-    if (!em) { u.loginErr = "Nhập email trước rồi bấm Quên mật khẩu."; u.loginMsg = null; render(); return }
-    resetPassword(em).then(() => { u.loginMsg = "Đã gửi email đặt lại mật khẩu (nếu email có tài khoản)."; u.loginErr = null; render() }).catch(err => { u.loginErr = errText(err); render() });
-  }
-  else if (a === "tts") { const sn = S.state && sentence(S.state.sentenceId); try { const t = new SpeechSynthesisUtterance(sn ? sn.jp : ""); t.lang = "ja-JP"; t.rate = .9; speechSynthesis.cancel(); speechSynthesis.speak(t) } catch (err) { } }
+  else if (a === "pw-eye") toggleEye(b);
+  else if (a === "tts") { const sn = S.state && sentence(S.state.sentenceId); if (sn) playSample(sn); }
 });
 app.addEventListener("change", e => {
   const s = e.target; if (!s.dataset || !s.dataset.act) return;

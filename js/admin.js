@@ -1,5 +1,7 @@
 // Trang quản trị: thành viên, ngân hàng câu, tài khoản & quyền, cài đặt, dữ liệu thi
-import { configured, db, watchAuth, login, logout, resetPassword, createAccount, errText, ROLES, DEFAULT_SETTINGS, esc } from "./core.js";
+import { configured, db, watchAuth, login, logout, createAccount, getDocOnce, normId, validId, pwField, toggleEye, errText, ROLES, DEFAULT_SETTINGS, esc } from "./core.js";
+const genPw = () => { const ch = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"; return Array.from(crypto.getRandomValues(new Uint32Array(10)), x => ch[x % ch.length]).join("") };
+const who = u => (u && (u.loginId || u.email)) || "";
 
 const LEVELS = ["Chưa biết", "N5", "N4", "N3", "N2", "N1"];
 const LAB = { "Chưa biết": "Dễ", "N5": "Dễ", "N4": "Trung bình", "N3": "Trung bình", "N2": "Khó", "N1": "Khó" };
@@ -56,7 +58,7 @@ function parseRoster(text) {
 function parseBank(text) {
   const { head, rows } = parseTable(text);
   const c = { id: col(head, "id"), set: col(head, "bộ"), label: col(head, "nhãn"), level: col(head, "cấp gốc", "cấp độ"), jp: col(head, "câu tiếng nhật", "tiếng nhật", "jp"),
-    hira: col(head, "phiên âm", "hiragana"), ro: col(head, "romaji"), vn: col(head, "nghĩa tiếng việt", "nghĩa", "vn") };
+    hira: col(head, "phiên âm", "hiragana"), ro: col(head, "romaji"), vn: col(head, "nghĩa tiếng việt", "nghĩa", "vn"), audio: col(head, "file audio", "audio") };
   if (c.id < 0 || c.jp < 0) throw new Error("Cần tối thiểu cột ID và Câu tiếng Nhật ở dòng tiêu đề.");
   const items = []; const seen = new Set();
   for (const r of rows) {
@@ -64,7 +66,7 @@ function parseBank(text) {
     const level = c.level >= 0 ? normLevel(r[c.level]) : "";
     let label = c.label >= 0 ? String(r[c.label] || "").trim() : ""; if (!LABELS.includes(label)) label = LAB[level] || "Dễ";
     let set = c.set >= 0 ? String(r[c.set] || "").trim() : ""; if (!SETS.includes(set)) set = "Thường";
-    items.push({ id, set, label, level, jp, hira: c.hira >= 0 ? String(r[c.hira] || "").trim() : "", ro: c.ro >= 0 ? String(r[c.ro] || "").trim() : "", vn: c.vn >= 0 ? String(r[c.vn] || "").trim() : "" });
+    items.push({ id, set, label, level, jp, hira: c.hira >= 0 ? String(r[c.hira] || "").trim() : "", ro: c.ro >= 0 ? String(r[c.ro] || "").trim() : "", vn: c.vn >= 0 ? String(r[c.vn] || "").trim() : "", audio: c.audio >= 0 ? String(r[c.audio] || "").trim() : "" });
   }
   return items;
 }
@@ -109,7 +111,7 @@ function vBank() {
     ${SETS.map(s => `<tr><td>${s}</td>${LABELS.map(l => `<td class="num">${cnt[s + "|" + l]}</td>`).join("")}<td class="num"><b>${LABELS.reduce((a, l) => a + cnt[s + "|" + l], 0)}</b></td></tr>`).join("")}</tbody></table></div>
     <p class="note">Bảng ngôi sao cần tối thiểu 3 câu Dễ + 3 câu Khó; nên có 10 + 10 để luôn giữ tỷ lệ 50-50 cho 7 lượt sao.</p></div>
     <div class="panel"><h2>Nhập ngân hàng câu từ Excel</h2>
-    <p class="note">Copy toàn bộ sheet <b>Ngan hang cau</b> (file Ngan_hang_cau_V1.xlsx, kèm dòng tiêu đề) rồi dán vào đây. Cột cần có: ID, Bộ, Nhãn, Câu tiếng Nhật; nên có Phiên âm (hiragana), Romaji, Nghĩa tiếng Việt. Thao tác này thay toàn bộ ngân hàng câu hiện tại.</p>
+    <p class="note">Copy toàn bộ sheet <b>Ngan hang cau</b> (file Ngan_hang_cau_V1.xlsx, kèm dòng tiêu đề) rồi dán vào đây. Cột cần có: ID, Bộ, Nhãn, Câu tiếng Nhật; nên có Phiên âm (hiragana), Romaji, Nghĩa tiếng Việt, File audio. Thao tác này thay toàn bộ ngân hàng câu hiện tại.</p>
     <div class="warn">Không đưa file ngân hàng câu lên GitHub: nội dung câu chỉ nằm trong cơ sở dữ liệu và chỉ tài khoản đã cấp quyền mới đọc được.</div>
     <textarea id="bankPaste" placeholder="ID&#9;Bộ&#9;Nhãn&#9;Cấp gốc&#9;Chủ đề&#9;Câu tiếng Nhật&#9;Phiên âm (hiragana)&#9;Romaji&#9;Nghĩa tiếng Việt"></textarea>
     <div class="row"><button data-act="b-parse">Đọc dữ liệu</button>${A.bankPreview ? `<span>Đọc được ${A.bankPreview.length} câu</span><button class="primary" data-act="b-apply">Lưu thay ngân hàng hiện tại</button>` : ""}</div></div>
@@ -125,22 +127,27 @@ function vAccounts() {
   let h = `<div class="panel"><h2>Tạo tài khoản</h2>
     <p class="note">Quyền: <b>Quản trị</b> – toàn bộ, kể cả trang này · <b>MC / Thư ký</b> – điều khiển lượt thi và màn hình lớn · <b>Giám khảo</b> – chỉ chấm điểm ở ghế được gán · <b>Màn hình lớn</b> – chỉ xem (dùng cho máy chiếu).</p>
     <form id="newUser" class="form-grid">
-      <div class="field"><label for="nu-email">Email</label><input id="nu-email" type="email" required></div>
+      <div class="field"><label for="nu-id">ID đăng nhập</label><input id="nu-id" required autocapitalize="off" spellcheck="false" placeholder="VD: thuky, giamkhao1"></div>
       <div class="field"><label for="nu-name">Tên hiển thị</label><input id="nu-name" required placeholder="VD: Giám khảo 1 – Anh A"></div>
-      <div class="field"><label for="nu-pw">Mật khẩu ban đầu</label><div class="row" style="flex-wrap:nowrap"><input id="nu-pw" required minlength="6" value="${esc(A.newPw)}" style="flex:1"><button type="button" data-act="genpw">Tạo</button></div></div>
+      <div class="field"><label for="nu-pw">Mật khẩu ban đầu</label><div class="row" style="flex-wrap:nowrap"><div class="pw-wrap" style="flex:1"><input id="nu-pw" type="password" required minlength="6" value="${esc(A.newPw)}" autocomplete="new-password"><button type="button" class="eye" data-act="pw-eye" data-for="nu-pw" aria-label="Hiện mật khẩu" aria-pressed="false" title="Hiện / ẩn mật khẩu">👁</button></div><button type="button" data-act="genpw">Tạo</button></div></div>
       <div class="field"><label for="nu-role">Vị trí / quyền</label><select id="nu-role">${roleOpts("judge")}</select></div>
       <div class="field"><label for="nu-seat">Ghế giám khảo</label><select id="nu-seat"><option value="">–</option>${[1, 2, 3, 4, 5].map(n => `<option>${n}</option>`).join("")}</select></div>
       <button class="primary" type="submit">Tạo tài khoản</button>
-    </form><p class="note">Gửi email và mật khẩu ban đầu cho người dùng qua kênh riêng; họ có thể đổi bằng "Quên mật khẩu" ở trang đăng nhập.</p></div>`;
+    </form><p class="note">ID: chữ không dấu, số, dấu chấm, gạch ngang (VD: <b>thuky</b>, <b>giamkhao1</b>, <b>manhinh</b>). Không phân biệt hoa thường. Gửi ID và mật khẩu cho người dùng qua kênh riêng.</p>
+    ${A.issued ? `<div class="ok" role="status">Mật khẩu của <b>${esc(A.issued.id)}</b>: <code style="font-size:1.05rem">${esc(A.issued.pw)}</code> <span class="note">– ghi lại và gửi cho người dùng, bảng này chỉ hiện một lần.</span> <button data-act="issued-ok">Đã ghi lại</button></div>` : ""}</div>`;
   h += `<div class="panel"><h2>Tài khoản (${A.users.length})</h2>${dup.length ? `<div class="err">Ghế giám khảo bị trùng: ${dup.join(", ")}. Mỗi ghế chỉ một người.</div>` : ""}
-    <div class="tablebox"><table><thead><tr><th>Email</th><th>Tên hiển thị</th><th>Vị trí / quyền</th><th>Ghế</th><th></th></tr></thead><tbody>
+    <div class="tablebox"><table><thead><tr><th>ID đăng nhập</th><th>Tên hiển thị</th><th>Vị trí / quyền</th><th>Ghế</th><th></th></tr></thead><tbody>
     ${A.users.sort((a, b) => (a.role || "").localeCompare(b.role || "") || (a.seat || 0) - (b.seat || 0)).map(u => `<tr>
-      <td>${esc(u.email)}${u.uid === A.me.user.uid ? ' <span class="pill">bạn</span>' : ""}</td>
+      <td>${esc(who(u))}${u.uid === A.me.user.uid ? ' <span class="pill">bạn</span>' : ""}</td>
       <td><input aria-label="Tên hiển thị" data-act="u-name" data-uid="${u.uid}" value="${esc(u.name || "")}"></td>
       <td><select aria-label="Quyền" data-act="u-role" data-uid="${u.uid}">${roleOpts(u.role || "none")}</select></td>
       <td><select aria-label="Ghế" data-act="u-seat" data-uid="${u.uid}" ${u.role === "judge" ? "" : "disabled"}><option value="">–</option>${[1, 2, 3, 4, 5].map(n => `<option ${Number(u.seat) === n ? "selected" : ""}>${n}</option>`).join("")}</select></td>
-      <td><div class="row" style="flex-wrap:nowrap"><button data-act="u-reset" data-email="${esc(u.email)}">Gửi email đổi mật khẩu</button></div></td></tr>`).join("")}</tbody></table></div>
-    <p class="note">Thu hồi quyền: chọn "Chưa cấp quyền". Muốn xóa hẳn tài khoản đăng nhập, vào Firebase Console › Authentication.</p></div>`;
+      <td><div class="row" style="flex-wrap:nowrap">${u.uid === A.me.user.uid ? "" : A.confirm === "u:" + u.uid
+        ? `<span class="note">Xóa ${esc(who(u))}?</span><button class="danger" data-act="u-del2" data-uid="${u.uid}">Xóa</button><button data-act="noconfirm">Không</button>`
+        : A.confirm === "p:" + u.uid
+        ? `<span class="note">Cấp mật khẩu mới?</span><button class="primary" data-act="u-newpw2" data-uid="${u.uid}">Cấp</button><button data-act="noconfirm">Không</button>`
+        : `${u.loginId ? `<button data-act="u-newpw" data-uid="${u.uid}">Cấp mật khẩu mới</button>` : ""}<button class="danger" data-act="u-del" data-uid="${u.uid}" aria-label="Xóa tài khoản ${esc(who(u))}">Xóa</button>`}</div></td></tr>`).join("")}</tbody></table></div>
+    <p class="note"><b>Xóa</b>: người đó không đăng nhập được nữa và ID được giải phóng để tạo lại. <b>Cấp mật khẩu mới</b>: giữ nguyên ID, quyền, ghế; mật khẩu cũ hết hiệu lực. Thu hồi quyền tạm thời: chọn "Chưa cấp quyền".</p></div>`;
   return h;
 }
 function vSettings() {
@@ -164,8 +171,8 @@ function vData() {
 function renderLogin() {
   app.innerHTML = `<div class="wrap"><div class="panel login"><div class="eyebrow">Start Kaiwa Contest</div><h1>Đăng nhập quản trị</h1>
     ${A.err ? `<div class="err">${esc(A.err)}</div>` : ""}
-    <form id="loginForm" class="form-grid" style="grid-template-columns:1fr"><div class="field"><label for="em">Email</label><input id="em" type="email" autocomplete="username" required></div>
-    <div class="field"><label for="pw">Mật khẩu</label><input id="pw" type="password" autocomplete="current-password" required></div><button class="primary" type="submit">Đăng nhập</button></form>
+    <form id="loginForm" class="form-grid" style="grid-template-columns:1fr"><div class="field"><label for="em">ID đăng nhập</label><input id="em" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" required></div>
+    ${pwField("pw", "Mật khẩu", 'autocomplete="current-password" required')}<button class="primary" type="submit">Đăng nhập</button></form>
     <a href="index.html">Về trang chính</a></div></div>`;
 }
 function render() {
@@ -199,8 +206,8 @@ app.addEventListener("change", e => {
   const s = e.target, a = s.dataset && s.dataset.act; if (!a) return;
   if (a === "m-level") { A.draft.teams[Number(s.dataset.t)].members[Number(s.dataset.m)].level = s.value; markDirty(); render() }
   const u = A.users.find(x => x.uid === s.dataset.uid);
-  if (a === "u-role" && u) { const patch = { role: s.value }; if (s.value !== "judge") patch.seat = null; run(() => db.doc("users/" + u.uid).merge(patch), "Đã cập nhật quyền cho " + u.email) }
-  if (a === "u-seat" && u) run(() => db.doc("users/" + u.uid).merge({ seat: s.value ? Number(s.value) : null }), "Đã gán ghế " + (s.value || "–") + " cho " + u.email);
+  if (a === "u-role" && u) { const patch = { role: s.value }; if (s.value !== "judge") patch.seat = null; run(() => db.doc("users/" + u.uid).merge(patch), "Đã cập nhật quyền cho " + who(u)) }
+  if (a === "u-seat" && u) run(() => db.doc("users/" + u.uid).merge({ seat: s.value ? Number(s.value) : null }), "Đã gán ghế " + (s.value || "–") + " cho " + who(u));
   if (a === "u-name" && u) run(() => db.doc("users/" + u.uid).merge({ name: s.value.trim() }), "Đã đổi tên hiển thị");
 });
 app.addEventListener("click", e => {
@@ -223,8 +230,26 @@ app.addEventListener("click", e => {
   else if (a === "b-apply") { const items = A.bankPreview; run(async () => { await db.doc("setup/bank").set({ items, updatedAt: Date.now() }); A.bankPreview = null }, "Đã lưu " + items.length + " câu") }
   else if (a === "b-del") { A.confirm = "b:" + b.dataset.id; render() }
   else if (a === "b-del2") { const items = A.bank.items.filter(x => x.id !== b.dataset.id); A.confirm = null; run(() => db.doc("setup/bank").set({ items, updatedAt: Date.now() }), "Đã xóa câu " + b.dataset.id) }
-  else if (a === "genpw") { const ch = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"; A.newPw = Array.from(crypto.getRandomValues(new Uint32Array(10)), x => ch[x % ch.length]).join(""); const el = document.getElementById("nu-pw"); if (el) el.value = A.newPw }
-  else if (a === "u-reset") run(() => resetPassword(b.dataset.email), "Đã gửi email đổi mật khẩu tới " + b.dataset.email);
+  else if (a === "genpw") { A.newPw = genPw(); const el = document.getElementById("nu-pw"); if (el) { el.value = A.newPw; el.type = "text"; const eye = document.querySelector('[data-for="nu-pw"]'); if (eye) { eye.classList.add("on"); eye.setAttribute("aria-pressed", "true") } } }
+  else if (a === "pw-eye") toggleEye(b);
+  else if (a === "issued-ok") { A.issued = null; render() }
+  else if (a === "u-del" || a === "u-newpw") { A.confirm = (a === "u-del" ? "u:" : "p:") + b.dataset.uid; render() }
+  else if (a === "u-del2") {
+    const u = A.users.find(x => x.uid === b.dataset.uid); A.confirm = null; if (!u) return;
+    run(async () => { await db.doc("users/" + u.uid).delete(); if (u.loginId) { const m = await getDocOnce("logins/" + u.loginId); if (!m || m.uid === u.uid) await db.doc("logins/" + u.loginId).delete() } }, "Đã xóa tài khoản " + who(u));
+  }
+  else if (a === "u-newpw2") {
+    const u = A.users.find(x => x.uid === b.dataset.uid); A.confirm = null; if (!u || !u.loginId) return;
+    const pw = genPw();
+    run(async () => {
+      const acc = await createAccount(u.loginId, pw);
+      const { uid: _old, ...prof } = u;
+      await db.doc("users/" + acc.uid).set(Object.assign({}, prof, { email: acc.email, updatedAt: Date.now() }));
+      await db.doc("logins/" + u.loginId).set({ email: acc.email, uid: acc.uid });
+      await db.doc("users/" + u.uid).delete();
+      A.issued = { id: u.loginId, pw };
+    }, "Đã cấp mật khẩu mới cho " + who(u));
+  }
   else if (a === "exp-results") {
     const rows = [["Team", "Thành viên", "Trình độ", "Giai đoạn", "Lượt chính", "Nhãn câu", "Ngôi sao", "Loại câu sao", "ID câu", "Số GK Đạt", "Số GK", "Điểm lượt", "Điểm sao", "Thời gian"]];
     [...A.results].sort((x, y) => (x.at || 0) - (y.at || 0)).forEach(r => { const m = memberInfo(r.teamId, r.memberId); rows.push([m.team, m.name, m.level, r.phase === "opening" ? "Mở màn" : "Chính", r.mainIndex || "", r.playLevel, r.star ? "Có" : "", r.starType || "", r.sentenceId, r.pass, r.judges, r.points, r.starPts || 0, new Date(r.at || 0).toLocaleString("vi-VN")]) });
@@ -239,9 +264,16 @@ app.addEventListener("submit", async e => {
   e.preventDefault(); const id = e.target.id; const v = x => document.getElementById(x).value;
   if (id === "loginForm") { try { await login(v("em"), v("pw")) } catch (x) { flash(null, errText(x)) } }
   if (id === "newUser") {
-    const email = v("nu-email").trim(), name = v("nu-name").trim(), pw = v("nu-pw"), role = v("nu-role"), seat = v("nu-seat");
+    const id = normId(v("nu-id")), name = v("nu-name").trim(), pw = v("nu-pw"), role = v("nu-role"), seat = v("nu-seat");
+    if (!validId(id)) return flash(null, errText({ code: "auth/invalid-id" }));
     if (role === "judge" && !seat) return flash(null, "Giám khảo cần được gán số ghế.");
-    run(async () => { const uid = await createAccount(email, pw); await db.doc("users/" + uid).set({ email, name, role, seat: role === "judge" ? Number(seat) : null, createdAt: Date.now() }); A.newPw = ""; e.target.reset() }, "Đã tạo tài khoản " + email);
+    if (A.users.some(u => u.loginId === id)) return flash(null, "ID " + id + " đã có. Chọn ID khác hoặc xóa tài khoản cũ trước.");
+    run(async () => {
+      const acc = await createAccount(id, pw);
+      await db.doc("users/" + acc.uid).set({ loginId: id, email: acc.email, name, role, seat: role === "judge" ? Number(seat) : null, createdAt: Date.now() });
+      await db.doc("logins/" + id).set({ email: acc.email, uid: acc.uid });
+      A.issued = { id, pw }; A.newPw = ""; e.target.reset();
+    }, "Đã tạo tài khoản " + id);
   }
   if (id === "settingsForm") {
     const num = x => Number(v(x));

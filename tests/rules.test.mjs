@@ -48,4 +48,9 @@ await T("admin edits users", assertSucceeds(setDoc(doc(adm, "users/j1"), { role:
 await T("owner (no profile) writes users", assertSucceeds(setDoc(doc(owner, "users/new"), { role: "judge", seat: 3 })));
 await T("owner lists users", assertSucceeds(getDocs(collection(owner, "users"))));
 await T("owner reads own missing profile", assertSucceeds(getDoc(doc(owner, "users/own"))));
+await T("anon reads one login id", assertSucceeds(getDoc(doc(anon, "logins/thuky"))));
+await T("anon cannot list login ids", assertFails(getDocs(collection(anon, "logins"))));
+await T("random cannot write login id", assertFails(setDoc(doc(rnd, "logins/thuky"), { email: "x@startkaiwa.local" })));
+await T("admin writes login id", assertSucceeds(setDoc(doc(adm, "logins/thuky"), { email: "thuky@startkaiwa.local", uid: "mc" })));
+await T("admin deletes user profile", assertSucceeds(deleteDoc(doc(adm, "users/scr"))));
 await env.cleanup();
